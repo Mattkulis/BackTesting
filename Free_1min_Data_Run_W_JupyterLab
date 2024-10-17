@@ -1,0 +1,100 @@
+##note on laptop the file autosaves to C:\Users\WhateverYourUserProfileNameIs
+
+import requests
+import pandas as pd
+from datetime import datetime, timedelta
+import time
+import io
+
+# Replace 'YOUR_API_KEY' with your actual Alpha Vantage API key
+API_KEY = '[GetYourOwnFreeKey@https://www.alphavantage.co/support/#api-key]'
+BASE_URL = 'https://www.alphavantage.co/query'
+
+def fetch_intraday_data(symbol, interval, start_date, end_date):
+    all_data = []
+    current_date = start_date
+    request_count = 0
+    
+    while current_date <= end_date:
+        params = {
+            'function': 'TIME_SERIES_INTRADAY',
+            'symbol': symbol,
+            'interval': interval,
+            'month': current_date.strftime('%Y-%m'),
+            'outputsize': 'full',
+            'apikey': API_KEY,
+            'datatype': 'csv'
+        }
+        
+        response = requests.get(BASE_URL, params=params)
+        
+        if response.status_code == 200:
+            df = pd.read_csv(io.StringIO(response.text), parse_dates=['timestamp'])
+            all_data.append(df)
+            print(f"Fetched data for {current_date.strftime('%Y-%m')}")
+        else:
+            print(f"Failed to fetch data for {current_date.strftime('%Y-%m')}")
+        
+        # Move to the next month
+        current_date = (current_date.replace(day=1) + timedelta(days=32)).replace(day=1)
+        
+        request_count += 1
+        
+        # If we've made 5 requests, pause for a longer time
+        if request_count % 5 == 0:
+            print("Reached 5 requests. Pausing for 70 seconds...")
+            time.sleep(70)  # Pause for 70 seconds after every 5 requests
+        else:
+            # Sleep to avoid hitting API rate limits
+            print("Pausing for 15 seconds...")
+            time.sleep(15)  # Pause for 15 seconds between each request
+    
+    return pd.concat(all_data, ignore_index=True)
+
+def process_data(data, start_date, end_date):
+    # Filter for the specified date range
+    data = data[(data['timestamp'].dt.date >= start_date.date()) & 
+                (data['timestamp'].dt.date <= end_date.date())]
+    
+    # Set timestamp as index
+    data.set_index('timestamp', inplace=True)
+    
+    # Sort data by date
+    data.sort_index(inplace=True)
+    
+    # Filter for market hours (9:30 AM to 4:00 PM ET)
+    data = data.between_time('09:30', '16:00')
+    
+    return data
+
+def save_to_csv(data, symbol, start_date, end_date):
+    filename = f"{symbol}_OHLCV_1min_{start_date.date()}_to_{end_date.date()}.csv"
+    data.to_csv(filename)
+    print(f"Data saved to {filename}")
+
+def get_date_input(prompt):
+    while True:
+        date_str = input(prompt)
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            print("Invalid date format. Please use YYYY-MM-DD.")
+
+def main():
+    symbol = input("Enter the stock symbol (e.g., AAPL): ").upper()
+    interval = input("Enter the interval (1min, 5min, 15min, 30min, 60min): ")
+    start_date = get_date_input("Enter the start date (YYYY-MM-DD): ")
+    end_date = get_date_input("Enter the end date (YYYY-MM-DD): ")
+    
+    print(f"Fetching data for {symbol}...")
+    raw_data = fetch_intraday_data(symbol, interval, start_date, end_date)
+    
+    print("Processing data...")
+    processed_data = process_data(raw_data, start_date, end_date)
+    
+    print("Saving data to CSV...")
+    save_to_csv(processed_data, symbol, start_date, end_date)
+
+if __name__ == "__main__":
+    main()
+
